@@ -471,8 +471,22 @@ typeCheckRuleDefinition file pm generateArtifacts = do
   setPriority priorityTypeCheck
   IdeOptions { optDefer = defer } <- getIdeOptions
 
+  -- Grab the /updated/ content of a file from disk, before passing the input 'ParsedModule' to
+  -- 'typecheckModule'. This is because plugins (which are called via 'initPlugins' inside 'typecheckModule')
+  -- needs to see the /updated/ file content in order to report warnings and errors in realtime. The
+  -- easiest way is to simply replace the input 'StringBuffer' of the 'ModSummary' contained in the
+  -- 'ParsedModule' with an updated one, although it might be better in the future to clearly pass this
+  -- as a separate argument to not accidentally override it at a later stage.
+
+  let ms  = pm_mod_summary pm
+  (_, mCurrentFileContent) <-
+    second (fmap textToStringBuffer) <$> getFileContents (toNormalizedFilePath' . ms_hspp_file $ ms)
+
+  let ms' = ms { ms_hspp_buf = mCurrentFileContent }
+  let pm' = pm { pm_mod_summary = ms' }
+
   addUsageDependencies $ liftIO $ do
-    res <- typecheckModule defer hsc (zipWith unpack mirs bytecodes) pm
+    res <- typecheckModule defer hsc (zipWith unpack mirs bytecodes) pm'
     case res of
       (diags, Just (hsc,tcm)) | DoGenerateInterfaceFiles <- generateArtifacts -> do
         diagsHie <- generateAndWriteHieFile hsc (tmrModule tcm)
